@@ -91,6 +91,7 @@ void spec(rgb_t* c, uint8_t i) {
     in  = &c->r;
     off = &c->g;
   }
+  // Simple linear fading for now
   *in  = 3 * i;
   *out = 255 - *in;
   *off = 0;
@@ -146,36 +147,18 @@ void setup() {
   // Enable SPI interrupt
   sbi(SPCR, SPIE);
 
-  // Other setup stuff
+  // ============ Other setup stuff =================
   Serial.begin(9600);
-  /*
-    uint8_t r = random(50);
-    uint8_t g = random(50);
-    uint8_t b = random(50);
-    uint32_t t1 = micros();
-    for (uint16_t i = 0; i < STRIP_LEN; i++) {
-      spec(&strip[i], (255 / 20)*i);
-    }
-    uint32_t t2 = micros();
-    init_strip_refresh();
-    while (pixel_pushing < STRIP_LEN);
-    uint32_t t3 = micros();
-    Serial.println(t2 - t1);
-    Serial.println(t3 - t2);
-
-    Serial.println(sizeof(strip));
-    Serial.println(sizeof(strip[0]));
-  */
 }
 
-#define FRAME_PERIOD_MS 50
 void loop() {
-  static uint32_t last_refresh = 0;
   static uint8_t counter = 0;
-  // Update frame at a steady rate
-  while (millis() - last_refresh < FRAME_PERIOD_MS);
-  last_refresh = millis();
-  init_strip_refresh();
-  counter++;
-  fill_rainbow(3 * counter, 2);
+  #define FRAME_FPS 20
+  static uint32_t last_strip_refresh = 0;
+  if (millis() - last_strip_refresh < 1000UL / FRAME_FPS) {
+    last_strip_refresh = millis();
+    init_strip_refresh();
+    counter++;
+    fill_rainbow(3 * counter, 2);
+  }
 }
