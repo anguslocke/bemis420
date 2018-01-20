@@ -15,7 +15,7 @@
 
 #define STRIP_LEN 320
 #define NUM_RGB 3
-#define NUM_SUBPIXELS (NUM_RGB * STRIP_LEN)
+#define STRIP_SUBPIXELS (NUM_RGB * STRIP_LEN)
 
 // Struct used for convenient manipulation of an RGB value
 typedef union {
@@ -33,39 +33,44 @@ typedef union {
 // of the strip uses less data.
 rgb_t strip[STRIP_LEN];
 
-// Global variables for managing pushing data to the strips
-volatile uint16_t pixel_pushing = STRIP_LEN;
-volatile uint8_t subpixel = 0;
+// The subpixel currently being pushed out over SPI
+volatile uint16_t subpixel_pushing = STRIP_SUBPIXELS;
+uint8_t inline __attribute__((always_inline)) safe_subpixel_pushing() {
+  // Get high byte of subpixel_pushing , then low byte (avr-gcc is little-endian)
+  uint8_t sp_high = *( (uint8_t*)(&subpixel_pushing) + 1);
+  uint8_t sp_low  = *( (uint8_t*)(&subpixel_pushing) );
+  uint16_t safe_sp = sp_low + ((uint16_t)sp_high) << 8;
+  // We grabbed the high byte first to mitigate issues from a race condition:
+  //   The ISR could increment subpixel_pushing in-between, with a carry.
+  // Grabbing the high byte first means that our (erroneous) local value
+  //   is less than the actual value, which is safer than possibly thinking
+  //   we're further down the strip than we actually are.
+  return safe_sp;
+}
+// Returns true if the specified pixel has been pushed
+//   i.e. it's safe to overwrite it
+uint8_t inline __attribute__((always_inline)) pixel_pushed(uint16_t pixel) {
+  return safe_subpixel_pushing() > pixel * NUM_RGB;
+}
 
-// Kicks off the SPI transfers for a whole strip, from the strip buffer
+// Kicks off pushing the strip buffer out to the strip
 void init_strip_refresh() {
-  if (pixel_pushing < STRIP_LEN) {
+  if (safe_subpixel_pushing() < STRIP_SUBPIXELS) {
     Serial.println("Waiting for previous refresh...");
-    while (pixel_pushing < STRIP_LEN);
+    while (safe_subpixel_pushing() < STRIP_SUBPIXELS);
   }
-  pixel_pushing = 0;
-  subpixel = 1;
-  // Write first byte manually to start SPI transfer
+  subpixel_pushing = 0;
+  // Write first subpixel manually to start SPI transfer
   SPDR = strip[0].rgb[0];
 }
 
 // When an SPI transfer completes, start transferring the next byte (if there is one)
 ISR(SPI_STC_vect) {
-  if (pixel_pushing >= STRIP_LEN) return;
-  SPDR = strip[pixel_pushing].rgb[subpixel];
-  subpixel++;
-  if (subpixel >= NUM_RGB) {
-    subpixel = 0;
-    pixel_pushing++;
-  }
-}
-
-// Atomically get pixel_pushing count (idk if necessary?)
-__attribute__((always_inline)) inline uint16_t get_pixel_pushing() {
-  cbi(SPCR, SPIE);
-  uint16_t pp = pixel_pushing;
-  sbi(SPCR, SPIE);
-  return pp;
+  // If we've pushed the entire strip, we're done
+  if (subpixel_pushing >= STRIP_SUBPIXELS) return;
+  // Else push the next subpixel
+  SPDR = ((uint8_t*)(&strip))[subpixel_pushing];
+  subpixel_pushing++;
 }
 
 // Maps an input byte to a color spectrum, and writes it to the provided rgb struct
@@ -102,7 +107,7 @@ void spec(rgb_t* c, uint8_t i) {
 void fill_rainbow(uint8_t offset = 0, uint8_t scale = 1) {
   for (uint16_t p = 0; p < STRIP_LEN; p++) {
     // Don't clobber a pixel till we've pushed it.
-    while (p >= pixel_pushing);
+    while (!pixel_pushed(p));
     spec(&strip[p], scale * p + offset);
   }
 }
