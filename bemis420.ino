@@ -66,11 +66,10 @@ void init_strip_refresh() {
 
 // When an SPI transfer completes, start transferring the next byte (if there is one)
 ISR(SPI_STC_vect) {
-  // If we've pushed the entire strip, we're done
-  if (subpixel_pushing >= STRIP_SUBPIXELS) return;
-  // Else push the next subpixel
-  SPDR = ((uint8_t*)(&strip))[subpixel_pushing];
   subpixel_pushing++;
+  if (subpixel_pushing < STRIP_SUBPIXELS) {
+    SPDR = ((uint8_t*)(&strip))[subpixel_pushing];
+  }
 }
 
 // Maps an input byte to a color spectrum, and writes it to the provided rgb struct
@@ -160,7 +159,7 @@ void loop() {
   static uint8_t counter = 0;
   #define FRAME_FPS 20
   static uint32_t last_strip_refresh = 0;
-  if (millis() - last_strip_refresh < 1000UL / FRAME_FPS) {
+  if (millis() - last_strip_refresh >= 1000UL / FRAME_FPS) {
     last_strip_refresh = millis();
     init_strip_refresh();
     counter++;
