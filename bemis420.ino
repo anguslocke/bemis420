@@ -35,11 +35,11 @@ rgb_t strip[STRIP_LEN];
 
 // The subpixel currently being pushed out over SPI
 volatile uint16_t subpixel_pushing = STRIP_SUBPIXELS;
-uint8_t inline __attribute__((always_inline)) safe_subpixel_pushing() {
+uint16_t inline __attribute__((always_inline)) safe_subpixel_pushing() {
   // Get high byte of subpixel_pushing , then low byte (avr-gcc is little-endian)
-  uint8_t sp_high = *( (uint8_t*)(&subpixel_pushing) + 1);
-  uint8_t sp_low  = *( (uint8_t*)(&subpixel_pushing) );
-  uint16_t safe_sp = sp_low + ((uint16_t)sp_high) << 8;
+  uint8_t sp_high = *( (volatile uint8_t*)(&subpixel_pushing) + 1);
+  uint8_t sp_low  = *( (volatile uint8_t*)(&subpixel_pushing) );
+  uint16_t safe_sp = sp_low + (((uint16_t)sp_high) << 8);
   // We grabbed the high byte first to mitigate issues from a race condition:
   //   The ISR could increment subpixel_pushing in-between, with a carry.
   // Grabbing the high byte first means that our (erroneous) local value
