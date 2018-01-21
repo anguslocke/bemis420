@@ -5,6 +5,12 @@
 #define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 #endif
 
+#define NUM_BUTTONS 2
+#define RED_BUTTON 0
+#define BLUE_BUTTON 1
+const uint8_t button_pin[NUM_BUTTONS] = {7, 9};
+const uint8_t button_led[NUM_BUTTONS] = {8, 10};
+
 // These are hardwired pins.  Cannot be changed.
 // Data (master out, slave in)
 #define MOSI_PIN  11 // PB3
@@ -72,6 +78,12 @@ ISR(SPI_STC_vect) {
   }
 }
 
+enum pattern_t {
+  RAINBOW,
+  NUM_PATTERNS,
+  STRIP_OFF
+};
+
 // Maps an input byte to a color spectrum, and writes it to the provided rgb struct
 #define SPEC_W 255
 void spec(rgb_t* c, uint8_t i) {
@@ -108,6 +120,32 @@ void fill_rainbow(uint8_t offset = 0, uint8_t scale = 1) {
     // Don't clobber a pixel till we've pushed it.
     while (!pixel_pushed(p));
     spec(&strip[p], scale * p + offset);
+  }
+}
+
+void fill_color(uint8_t r, uint8_t g, uint8_t b) {
+  for (uint16_t p = 0; p < STRIP_LEN; p++) {
+    // Don't clobber a pixel till we've pushed it.
+    while (!pixel_pushed(p));
+    strip[p].r = r;
+    strip[p].g = g;
+    strip[p].b = b;
+  }
+}
+
+void fill_color_strobe(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms, uint32_t ms) {
+  static uint8_t state = 0;
+  static uint32_t last_change = 0;
+  if (ms - last_change >= period_ms / 2) state = !state;
+
+  if (!state) r = g = b = 0;
+
+  for (uint16_t p = 0; p < STRIP_LEN; p++) {
+    // Don't clobber a pixel till we've pushed it.
+    while (!pixel_pushed(p));
+    strip[p].r = r;
+    strip[p].g = g;
+    strip[p].b = b;
   }
 }
 
@@ -153,9 +191,19 @@ void setup() {
 
   // ============ Other setup stuff =================
   Serial.begin(9600);
+  
+  for (uint8_t b = 0; b < NUM_BUTTONS; b++) {
+    pinMode(button_pin[b], INPUT);
+    digitalWrite(button_pin[b], HIGH);
+    pinMode(button_led[b], OUTPUT);
+    digitalWrite(button_led[b], LOW);
+  }
 }
 
+uint8_t current_pattern = RAINBOW;
+
 void loop() {
+  // ===================== STRIP REFRESH =====================
   static uint8_t counter = 0;
   #define FRAME_FPS 20
   static uint32_t last_strip_refresh = 0;
@@ -163,6 +211,46 @@ void loop() {
     last_strip_refresh = millis();
     init_strip_refresh();
     counter++;
-    fill_rainbow(3 * counter, 2);
+    
+    switch (current_pattern) {
+    case RAINBOW:
+      fill_rainbow(3 * counter, 2);
+      break;
+    default:
+      fill_color(0, 0, 0);
+      break;
+    }
+  }
+  
+  // =================== INPUT HANDLING ======================
+  uint8_t button_pressed[NUM_BUTTONS];
+  static uint8_t last_state[NUM_BUTTONS] = {0};
+  static uint32_t last_state_change[NUM_BUTTONS] = {0};
+#define DEBOUNCE_MS 50
+  for (uint8_t b = 0; b < NUM_BUTTONS; b++) {
+    button_pressed[b] = 0;
+    uint8_t current_state = !digitalRead(button_pin[b]);
+    if (current_state != last_state[b] &&
+        millis() - last_state_change[b] >= DEBOUNCE_MS) {
+      last_state[b] = current_state;
+      last_state_change[b] = millis();
+      if (current_state) button_pressed[b] = 1;
+    }
+  }
+  
+  // =================== BUTTON RESPONSES ====================
+  if (button_pressed[RED_BUTTON]) {
+    if (current_pattern != STRIP_OFF) current_pattern = STRIP_OFF;
+    else current_pattern = RAINBOW;
+  }
+  if (button_pressed[BLUE_BUTTON]) {
+    if (current_pattern != STRIP_OFF) {
+      current_pattern = (current_pattern + 1) % NUM_PATTERNS;
+    }
+  }
+  
+  // =================== BUTTON LEDS ======================
+  for (uint8_t b = 0; b < NUM_BUTTONS; b++) {
+    digitalWrite(button_led[b], last_state[b]);
   }
 }
